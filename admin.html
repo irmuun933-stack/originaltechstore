@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="mn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#07080a">
+<title>Захиалга — OTS админ</title>
+<style>
+:root { --ink: #07080a; --ink-2: #0f1114; --ink-3: #161a1e; --line: rgba(236, 228, 214, .1); --line-2: rgba(236, 228, 214, .2); --fg: #ede6da; --fg-2: #b8b1a6; --dim: #8a847c; --gold: #cfa77d; --ok: #a9d4b1; --warn: #ffc27a; --bad: #ff8f8f; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ink); color: var(--fg); font: 15px/1.5 Inter, 'Segoe UI', system-ui, -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }
+button, input { font: inherit; color: inherit; }
+header { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: calc(env(safe-area-inset-top, 0px) + 14px) 16px 12px; background: rgba(7, 8, 10, .9); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+h1 { margin: 0; font-size: 17px; font-weight: 500; flex: 1; }
+h1 small { color: var(--dim); font-weight: 400; font-size: 13px; margin-left: 8px; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; width: 100%; }
+.tabs button, .btn, .ghost { height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line-2); background: transparent; cursor: pointer; font-size: 13px; }
+.tabs button[aria-pressed="true"] { background: var(--fg); color: #0a0b0d; border-color: var(--fg); }
+.tabs b { display: inline-grid; place-items: center; min-width: 20px; height: 20px; margin-left: 6px; padding: 0 6px; border-radius: 10px; background: var(--warn); color: #1a1206; font-size: 11px; }
+.btn { background: var(--fg); color: #0a0b0d; border-color: var(--fg); font-weight: 500; }
+.btn.ok { background: var(--ok); border-color: var(--ok); }
+.ghost.bad { color: var(--bad); border-color: rgba(255, 143, 143, .35); }
+main { max-width: 980px; margin: 0 auto; padding: 16px 16px calc(env(safe-area-inset-bottom, 0px) + 40px); display: grid; gap: 12px; }
+.card { border: 1px solid var(--line); border-radius: 16px; background: var(--ink-2); padding: 14px 16px; display: grid; gap: 8px; }
+.card.hot { border-color: rgba(255, 194, 122, .55); box-shadow: 0 0 0 1px rgba(255, 194, 122, .2) inset; }
+.row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.no { font-weight: 600; letter-spacing: .02em; }
+.when { color: var(--dim); font-size: 13px; }
+.badge { margin-left: auto; padding: 3px 10px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line-2); white-space: nowrap; }
+.s-new { color: var(--fg-2); } .s-paid { color: #1a1206; background: var(--warn); border-color: var(--warn); }
+.s-confirmed, .s-preparing { color: var(--gold); border-color: rgba(207, 167, 125, .5); } .s-ready, .s-shipped { color: #9fd3ff; border-color: rgba(159, 211, 255, .45); }
+.s-done { color: var(--ok); border-color: rgba(169, 212, 177, .45); } .s-cancelled { color: var(--bad); border-color: rgba(255, 143, 143, .4); }
+.kv { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 2px 12px; font-size: 14px; }
+.kv dt { color: var(--dim); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+.kv a { color: var(--fg); }
+.total { font-size: 18px; font-weight: 500; }
+.acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.empty, .msg { color: var(--dim); text-align: center; padding: 40px 0; }
+.login { max-width: 380px; margin: 12vh auto 0; padding: 0 16px; display: grid; gap: 12px; }
+.login input { height: 46px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--ink-2); }
+.login p { color: var(--dim); font-size: 13px; margin: 0; }
+.err { color: var(--bad); font-size: 13px; }
+.top-acts { display: flex; gap: 8px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// Захиалгын системийн хаяг (Apps Script) — build_flat.sh сайтын тохиргооноос (products.js → orderApi) бөглөнө
+var API = '';
+(function () {
+  var $app = document.getElementById('app');
+  var LS = { get: function (k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }, set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
+  if (!API || API.indexOf('__') === 0) API = LS.get('ots-admin-api');
+  var key = LS.get('ots-admin-key'), orders = [], filter = 'todo', busy = false, timer = 0, lastHot = -1;
+  var L = { new: 'Шинэ', paid: 'Төлбөр шалгах', confirmed: 'Төлбөр баталгаажсан', preparing: 'Бэлтгэж байна', ready: 'Авахад бэлэн', shipped: 'Хүргэлтэд гарсан', done: 'Дууссан', cancelled: 'Цуцлагдсан' };
+  var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var when = function (v) { var d = new Date(v); return isNaN(d) ? '' : d.toLocaleString('mn-MN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); };
+  var isPickup = function (o) { return o.dtype === 'pickup' || /авах/i.test(o.delivery || ''); };
+  var isBank = function (o) { return o.payId === 'bank' || /данс/i.test(o.pay || ''); };
+
+  function login(err) {
+    clearInterval(timer);
+    $app.innerHTML = '<form class="login" id="lf"><h1>OTS · Захиалга</h1>' +
+      (API ? '' : '<input id="api" placeholder="Apps Script вэб апп-ын хаяг (https://script.google.com/...)" required>') +
+      '<input id="key" type="password" placeholder="Админ нууц үг" autocomplete="current-password" required>' +
+      (err ? '<p class="err">' + esc(err) + '</p>' : '') +
+      '<button class="btn" style="height:46px">Нэвтрэх</button><p>Нууц үг Apps Script-ийн ADMIN_KEY-тэй ижил. Энэ төхөөрөмж дээр хадгалагдана.</p></form>';
+    document.getElementById('lf').onsubmit = function (e) {
+      e.preventDefault();
+      var a = document.getElementById('api'); if (a) { API = a.value.trim(); LS.set('ots-admin-api', API); }
+      key = document.getElementById('key').value.trim(); LS.set('ots-admin-key', key); load(true);
+    };
+  }
+
+  function load(first) {
+    if (busy) return; busy = true;
+    fetch(API, { method: 'POST', body: JSON.stringify({ action: 'list', key: key }) }).then(function (r) { return r.json(); }).then(function (j) {
+      busy = false;
+      if (!j.ok) { if (j.error === 'auth') { LS.set('ots-admin-key', ''); return login('Нууц үг буруу байна.'); } throw new Error(j.error); }
+      orders = j.orders || []; render();
+      var hot = orders.filter(function (o) { return o.status === 'paid' || o.status === 'new'; }).length;
+      if (lastHot >= 0 && hot > lastHot && navigator.vibrate) navigator.vibrate(200);
+      lastHot = hot; document.title = (hot ? '(' + hot + ') ' : '') + 'Захиалга — OTS админ';
+      if (first) { clearInterval(timer); timer = setInterval(function () { if (!document.hidden) load(); }, 30000); }
+    }).catch(function () { busy = false; if (first) login('Холбогдож чадсангүй. Хаягаа шалгана уу.'); });
+  }
+
+  function setStatus(no, status, btn) {
+    if (status === 'cancelled' && !confirm(no + ' захиалгыг цуцлах уу?')) return;
+    btn.disabled = true; btn.textContent = '…';
+    fetch(API, { method: 'POST', body: JSON.stringify({ action: 'set', key: key, no: no, status: status }) }).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j.ok) throw new Error(j.error);
+      orders.forEach(function (o) { if (o.no === no) o.status = status; }); render();
+    }).catch(function () { btn.disabled = false; btn.textContent = 'Дахин оролдох'; });
+  }
+
+  // Төлөв бүрт дараагийн алхмын товч
+  function actions(o) {
+    var a = [];
+    if (o.status === 'paid') a.push(['confirmed', 'Төлбөр орсон — баталгаажуулах', 'btn ok'], ['new', 'Төлбөр ороогүй', 'ghost']);
+    if (o.status === 'new') a.push(isBank(o) ? ['confirmed', 'Төлбөр орсон — баталгаажуулах', 'btn ok'] : ['confirmed', 'Захиалга баталгаажуулах', 'btn ok']);
+    if (o.status === 'confirmed') a.push(['preparing', 'Бэлтгэж эхлэх', 'btn']);
+    if (o.status === 'preparing') a.push(isPickup(o) ? ['ready', 'Авахад бэлэн', 'btn'] : ['shipped', 'Хүргэлтэд гарсан', 'btn']);
+    if (o.status === 'ready' || o.status === 'shipped') a.push(['done', 'Хүлээлгэн өгсөн — дуусгах', 'btn ok']);
+    if (o.status !== 'done' && o.status !== 'cancelled') a.push(['cancelled', 'Цуцлах', 'ghost bad']);
+    return a;
+  }
+
+  function render() {
+    var groups = {
+      todo: function (o) { return o.status === 'paid' || o.status === 'new'; },
+      active: function (o) { return ['confirmed', 'preparing', 'ready', 'shipped'].indexOf(o.status) >= 0; },
+      done: function (o) { return o.status === 'done' || o.status === 'cancelled'; },
+      all: function () { return true; },
+    };
+    var count = function (g) { return orders.filter(groups[g]).length; };
+    var list = orders.filter(groups[filter]).sort(function (a, b) { return (b.status === 'paid') - (a.status === 'paid'); });
+    var tab = function (g, l) { var n = g === 'todo' ? count(g) : 0; return '<button data-f="' + g + '" aria-pressed="' + (filter === g) + '">' + l + (n ? '<b>' + n + '</b>' : '') + '</button>'; };
+    $app.innerHTML = '<header><h1>OTS · Захиалга<small>' + orders.length + ' нийт</small></h1><div class="top-acts"><button class="ghost" id="rf">Шинэчлэх</button><button class="ghost" id="lo">Гарах</button></div>' +
+      '<div class="tabs">' + tab('todo', 'Шийдэх') + tab('active', 'Явж буй') + tab('done', 'Дууссан') + tab('all', 'Бүгд') + '</div></header><main>' +
+      (list.length ? list.map(function (o) {
+        return '<article class="card' + (o.status === 'paid' ? ' hot' : '') + '"><div class="row"><span class="no">' + esc(o.no) + '</span><span class="when">' + when(o.at) + '</span><span class="badge s-' + esc(o.status) + '">' + esc(L[o.status] || o.status) + '</span></div>' +
+          '<dl class="kv"><dt>Нэр</dt><dd>' + esc(o.name) + '</dd><dt>Утас</dt><dd><a href="tel:' + esc(String(o.phone).replace(/[^\d+]/g, '')) + '">' + esc(o.phone) + '</a></dd>' +
+          '<dt>Хүргэлт</dt><dd>' + esc(o.delivery) + (o.address ? '<br>' + esc(o.address) : '') + '</dd><dt>Төлбөр</dt><dd>' + esc(o.pay) + '</dd>' +
+          '<dt>Бараа</dt><dd>' + esc(o.items).split('; ').join('<br>') + '</dd>' + (o.note ? '<dt>Тэмдэглэл</dt><dd>' + esc(o.note) + '</dd>' : '') +
+          '<dt>Нийт</dt><dd class="total">' + esc(o.total) + '</dd></dl>' +
+          '<div class="acts">' + actions(o).map(function (a) { return '<button class="' + a[2] + '" data-no="' + esc(o.no) + '" data-s="' + a[0] + '">' + a[1] + '</button>'; }).join('') + '</div></article>';
+      }).join('') : '<p class="empty">Энд захиалга алга.</p>') + '</main>';
+    $app.querySelectorAll('[data-f]').forEach(function (b) { b.onclick = function () { filter = b.getAttribute('data-f'); render(); }; });
+    $app.querySelectorAll('[data-s]').forEach(function (b) { b.onclick = function () { setStatus(b.getAttribute('data-no'), b.getAttribute('data-s'), b); }; });
+    document.getElementById('rf').onclick = function () { load(); };
+    document.getElementById('lo').onclick = function () { LS.set('ots-admin-key', ''); key = ''; login(); };
+  }
+
+  if (API && key) { $app.innerHTML = '<p class="msg">Ачаалж байна…</p>'; load(true); } else login();
+})();
+</script>
+</body>
+</html>
